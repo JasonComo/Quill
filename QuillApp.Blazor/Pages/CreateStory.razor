@@ -1,0 +1,125 @@
+@page "/stories/new"
+@using System.Net.Http.Json
+@using QuillApp.Blazor.Services
+@using QuillApp.DTOs
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+@inject QuillApp.Blazor.State.CurrentApp CurrentApp
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">New story</div>
+        <h1>Create Story</h1>
+        <p class="page-subtitle">Define what should be built and how you will know it is done.</p>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <p class="status">@_status</p>
+}
+
+@if (CurrentUser.UserId is null)
+{
+    <div class="panel form-panel">
+        <p>You must log in first.</p>
+        <button type="button" @onclick="GoToLogin">Go to Login</button>
+    </div>
+}
+else if (CurrentApp.AppId is null)
+{
+    <div class="panel form-panel">
+        <p>No app selected. Go back to Apps and choose Stories on an app first.</p>
+        <button type="button" @onclick="GoHome">Go Home</button>
+    </div>
+}
+else
+{
+    <EditForm class="panel form-panel" Model="_model" OnValidSubmit="HandleSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-field">
+            <label>Title</label>
+            <InputText @bind-Value="_model.Title" />
+        </div>
+
+        <div class="form-field">
+            <label>Description</label>
+            <InputTextArea @bind-Value="_model.Description" />
+        </div>
+
+        <div class="form-field">
+            <label>Criteria</label>
+            <InputTextArea @bind-Value="_model.Criteria" />
+        </div>
+
+        <div class="actions">
+            <button type="submit">Create story</button>
+            <button class="secondary" type="button" @onclick="GoBack">Cancel</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private StoryCreateDto _model = new();
+    private string? _status;
+
+    private void GoToLogin() => Nav.NavigateTo("/login");
+    private void GoHome() => Nav.NavigateTo("/");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+            await Auth.RefreshCurrentUserAsync();
+    }
+
+    private void GoBack()
+    {
+        if (CurrentApp.AppId is null)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        Nav.NavigateTo($"/apps/{CurrentApp.AppId.Value}/stories");
+    }
+
+    private async Task HandleSubmit()
+    {
+        _status = null;
+
+        if (CurrentUser.UserId is null)
+        {
+            _status = "Not logged in.";
+            return;
+        }
+
+        if (CurrentApp.AppId is null)
+        {
+            _status = "No current app selected.";
+            return;
+        }
+
+        _model.AppId = CurrentApp.AppId.Value;
+
+        try
+        {
+            var res = await Http.PostAsJsonAsync("api/story", _model);
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _status = $"Create failed: {msg}";
+                return;
+            }
+
+            Nav.NavigateTo($"/apps/{CurrentApp.AppId.Value}/stories");
+        }
+        catch (Exception ex)
+        {
+            _status = $"Error: {ex.Message}";
+        }
+    }
+}

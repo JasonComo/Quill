@@ -1,0 +1,72 @@
+@page "/login"
+@using QuillApp.Blazor.DTOs
+@using QuillApp.Blazor.Services
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+
+<section class="auth-wrap">
+    <div class="panel auth-card">
+        <div class="page-kicker">Secure access</div>
+        <h3>Sign in to Quill</h3>
+        <p class="auth-note">Continue planning apps, stories, and acceptance criteria from your private workspace.</p>
+
+        <EditForm Model="_model" OnValidSubmit="HandleLogin">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-field">
+                <label>Email</label>
+                <InputText @bind-Value="_model.Email" />
+            </div>
+
+            <div class="form-field">
+                <label>Password</label>
+                <InputText @bind-Value="_model.Password" type="password" />
+            </div>
+
+            <div class="actions">
+                <button type="submit">Log in</button>
+                <button class="secondary" type="button" @onclick="GoToSignup">Create account</button>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_status))
+        {
+            <p class="status">@_status</p>
+        }
+
+        @if (CurrentUser.UserId is not null)
+        {
+            <p class="auth-note">Signed in as <strong>@CurrentUser.Email</strong></p>
+        }
+    </div>
+</section>
+
+@code {
+    private LoginRequestDto _model = new();
+    private string? _status;
+
+    private void GoToSignup() => Nav.NavigateTo("/signup");
+
+    private async Task HandleLogin()
+    {
+        _status = null;
+
+        try
+        {
+            var result = await Auth.LoginAsync(_model);
+            if (!result.Succeeded)
+            {
+                _status = result.Error ?? "Invalid email or password.";
+                return;
+            }
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _status = $"Login error: {ex.Message}";
+        }
+    }
+}

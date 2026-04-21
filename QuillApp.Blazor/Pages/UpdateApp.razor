@@ -1,0 +1,178 @@
+@page "/apps/{AppId:int}/update"
+@using System.Net.Http.Json
+@using QuillApp.Blazor.DTOs
+@using QuillApp.Blazor.Services
+@using QuillApp.DTOs
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">App detail</div>
+        <h1>Edit App</h1>
+        <p class="page-subtitle">Keep the app profile accurate so its stories stay grounded.</p>
+    </div>
+</section>
+
+@if (_loading)
+{
+    <div class="panel form-panel">Loading app...</div>
+}
+else if (!string.IsNullOrWhiteSpace(_status))
+{
+    <p class="status">@_status</p>
+}
+else if (CurrentUser.UserId is null)
+{
+    <div class="panel form-panel">
+        <p>You must log in first.</p>
+        <button type="button" @onclick="GoToLogin">Go to Login</button>
+    </div>
+}
+else
+{
+    <EditForm class="panel form-panel" Model="_model" OnValidSubmit="HandleSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Name</label>
+                <InputText @bind-Value="_model.Name" />
+            </div>
+
+            <div class="form-field">
+                <label>Purpose</label>
+                <InputText @bind-Value="_model.Purpose" />
+            </div>
+
+            <div class="form-field">
+                <label>App Type</label>
+                <InputSelect @bind-Value="_model.AppType">
+                    <option value="1">Web</option>
+                    <option value="2">Mobile</option>
+                    <option value="3">Desktop</option>
+                    <option value="4">Game</option>
+                    <option value="5">Other</option>
+                </InputSelect>
+            </div>
+
+            <div class="form-field">
+                <label>Field</label>
+                <InputSelect @bind-Value="_model.Field">
+                    <option value="1">Technology</option>
+                    <option value="2">Business</option>
+                    <option value="3">Education</option>
+                    <option value="4">Entertainment</option>
+                    <option value="5">Other</option>
+                </InputSelect>
+            </div>
+
+            <div class="form-field">
+                <label>Target User</label>
+                <InputSelect @bind-Value="_model.TargetUser">
+                    <option value="1">Professional</option>
+                    <option value="2">Student</option>
+                    <option value="3">Teacher</option>
+                    <option value="4">Everyone</option>
+                    <option value="5">Other</option>
+                </InputSelect>
+            </div>
+
+            <div class="form-field full">
+                <label>Additional Info</label>
+                <InputTextArea @bind-Value="_model.AdditionalInfo" />
+            </div>
+        </div>
+
+        <div class="actions">
+            <button type="submit">Save app</button>
+            <button class="secondary" type="button" @onclick="GoBack">Cancel</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int AppId { get; set; }
+
+    private bool _loading = true;
+    private string? _status;
+    private AppUpdateDto _model = new();
+
+    private void GoToLogin() => Nav.NavigateTo("/login");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            var auth = await Auth.RefreshCurrentUserAsync();
+            if (!auth.Succeeded)
+            {
+                _loading = false;
+                Nav.NavigateTo("/login");
+                return;
+            }
+        }
+
+        try
+        {
+            _loading = true;
+            _status = null;
+
+            var app = await Http.GetFromJsonAsync<AppResponseDto>($"api/app/{AppId}");
+            if (app is null)
+            {
+                _status = "App was not found.";
+                return;
+            }
+
+            _model.AppId = app.AppId;
+            _model.Name = app.Name;
+            _model.Purpose = app.Purpose;
+            _model.AppType = app.AppType;
+            _model.Field = app.Field;
+            _model.TargetUser = app.TargetUser;
+            _model.AdditionalInfo = app.AdditionalInfo;
+            _model.UserId = app.UserId;
+        }
+        catch (Exception ex)
+        {
+            _status = $"Load failed: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            _status = "Not logged in.";
+            return;
+        }
+
+        try
+        {
+            _model.UserId = CurrentUser.UserId.Value;
+            var res = await Http.PutAsJsonAsync($"api/app/{AppId}", _model);
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _status = $"Update failed: {msg}";
+                return;
+            }
+
+            GoBack();
+        }
+        catch (Exception ex)
+        {
+            _status = $"Update error: {ex.Message}";
+        }
+    }
+
+    private void GoBack() => Nav.NavigateTo("/");
+}

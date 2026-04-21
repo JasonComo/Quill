@@ -1,0 +1,197 @@
+@page "/"
+@using System.Net.Http.Json
+@using QuillApp.Blazor.DTOs
+@using QuillApp.Blazor.Services
+@using QuillApp.Blazor.State
+@inject CurrentApp CurrentApp
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">App portfolio</div>
+        <h1>My Apps</h1>
+        <p class="page-subtitle">Shape product ideas into focused apps, then break each one into clear, testable stories.</p>
+    </div>
+    <div class="actions">
+        <button type="button" @onclick="GoToCreate">New app</button>
+        <button class="secondary" type="button" @onclick="Logout">Logout</button>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <p class="status">@_error</p>
+}
+
+@if (_loading)
+{
+    <div class="panel form-panel">Loading your workspace...</div>
+}
+else if (_apps.Count == 0)
+{
+    <div class="empty-state">
+        <div class="page-kicker">No apps yet</div>
+        <h3>Start with one product idea.</h3>
+        <p class="page-subtitle">Create an app record first, then add stories that describe the work.</p>
+        <div class="actions center">
+            <button @onclick="GoToCreate">Create first app</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card-grid">
+        @foreach (var app in _apps)
+        {
+            <article class="app-card">
+                <div>
+                    <h4 class="card-title">@app.Name</h4>
+                    <p class="card-description">@app.Purpose</p>
+
+                    <div class="badge-row">
+                        <span class="badge">Type: @GetAppTypeName(app.AppType)</span>
+                        <span class="badge">Field: @GetFieldName(app.Field)</span>
+                        <span class="badge">Target: @GetTargetUserName(app.TargetUser)</span>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(app.AdditionalInfo))
+                    {
+                        <div class="metadata">
+                            <div><strong>Notes</strong></div>
+                            <div>@app.AdditionalInfo</div>
+                        </div>
+                    }
+                </div>
+
+                <div class="actions">
+                    <button class="secondary" type="button" @onclick="() => GoToStories(app.AppId)">Stories</button>
+                    <button class="secondary" type="button" @onclick="() => GoToEdit(app.AppId)">Edit</button>
+                    <button class="danger"
+                            type="button"
+                            @onclick="() => DeleteApp(app.AppId)"
+                            disabled="@_deletingIds.Contains(app.AppId)">
+                        @(_deletingIds.Contains(app.AppId) ? "Deleting..." : "Delete")
+                    </button>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    private List<AppResponseDto> _apps = new();
+    private HashSet<int> _deletingIds = new();
+    private bool _loading = true;
+    private string? _error;
+
+    private void GoToStories(int appId)
+    {
+        CurrentApp.Set(appId);
+        Nav.NavigateTo($"/apps/{appId}/stories");
+    }
+
+    private void GoToCreate() => Nav.NavigateTo("/apps/new");
+
+    private void GoToEdit(int appId) => Nav.NavigateTo($"/apps/{appId}/update");
+
+    private static string GetAppTypeName(int value) => value switch
+    {
+        1 => "Web",
+        2 => "Mobile",
+        3 => "Desktop",
+        4 => "Game",
+        5 => "Other",
+        _ => "Unknown"
+    };
+
+    private static string GetFieldName(int value) => value switch
+    {
+        1 => "Technology",
+        2 => "Business",
+        3 => "Education",
+        4 => "Entertainment",
+        5 => "Other",
+        _ => "Unknown"
+    };
+
+    private static string GetTargetUserName(int value) => value switch
+    {
+        1 => "Professional",
+        2 => "Student",
+        3 => "Teacher",
+        4 => "Everyone",
+        5 => "Other",
+        _ => "Unknown"
+    };
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        CurrentApp.Clear();
+        Nav.NavigateTo("/login");
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            var auth = await Auth.RefreshCurrentUserAsync();
+            if (!auth.Succeeded)
+            {
+                Nav.NavigateTo("/login");
+                return;
+            }
+        }
+
+        try
+        {
+            _loading = true;
+            _error = null;
+            _apps = await Http.GetFromJsonAsync<List<AppResponseDto>>("api/app") ?? new();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load apps: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task DeleteApp(int appId)
+    {
+        if (CurrentUser.UserId is null)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _error = null;
+            _deletingIds.Add(appId);
+
+            var res = await Http.DeleteAsync($"api/app/{appId}");
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _error = $"Delete failed: {msg}";
+                return;
+            }
+
+            _apps.RemoveAll(a => a.AppId == appId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete error: {ex.Message}";
+        }
+        finally
+        {
+            _deletingIds.Remove(appId);
+        }
+    }
+}

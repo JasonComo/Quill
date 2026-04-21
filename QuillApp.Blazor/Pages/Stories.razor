@@ -1,0 +1,345 @@
+@page "/apps/{AppId:int}/stories"
+@using System.Net.Http.Json
+@using QuillApp.Blazor.DTOs
+@using QuillApp.Blazor.Services
+@using QuillApp.DTOs
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+@inject QuillApp.Blazor.State.CurrentApp CurrentApp
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">@(_appName ?? "Selected app")</div>
+        <h1>Stories</h1>
+        <p class="page-subtitle">Create simple User Stories and generate downloadable HTML mockups for individual features.</p>
+    </div>
+    <div class="actions">
+        <button @onclick="GoToCreate">New story</button>
+        <button class="secondary" @onclick="GoHome">Apps</button>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <p class="status">@_error</p>
+}
+
+@if (_loading)
+{
+    <div class="panel form-panel">Loading stories...</div>
+}
+else if (_stories.Count == 0)
+{
+    <div class="empty-state">
+        <div class="page-kicker">No stories yet</div>
+        <h3>Add the first slice of work.</h3>
+        <p class="page-subtitle">Start with one user outcome and the criteria that proves it works.</p>
+        <div class="actions center">
+            <button @onclick="GoToCreate">Create first story</button>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card-grid">
+        @foreach (var story in _stories)
+        {
+            var mockups = GetMockupsForStory(story.StoryId);
+
+            <article class="story-card">
+                <div>
+                    <h4 class="card-title">@story.Title</h4>
+                    <p class="card-description">@story.Description</p>
+                    <div class="metadata">
+                        <div><strong>Acceptance criteria</strong></div>
+                        <div>@story.Criteria</div>
+                    </div>
+                </div>
+
+                <div class="mockup-zone">
+                    <div class="mockup-header">
+                        <strong>Mockups</strong>
+                        <span>@mockups.Count generated</span>
+                    </div>
+
+                    @if (mockups.Count > 0)
+                    {
+                        <div class="mockup-list">
+                            @foreach (var mockup in mockups)
+                            {
+                                <div class="mockup-row">
+                                    <div>
+                                        <strong>@GetMockupDisplayName(mockup, mockups)</strong>
+                                        <span>@mockup.CreatedAtUtc.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
+                                        <span class="@GetMockupStatusClass(mockup)">@mockup.Status</span>
+                                        @if (!string.IsNullOrWhiteSpace(mockup.ErrorMessage))
+                                        {
+                                            <span class="mockup-error">@mockup.ErrorMessage</span>
+                                        }
+                                    </div>
+                                    <div class="actions">
+                                        <button class="secondary" type="button" @onclick="() => DownloadMockup(mockup, mockups)">Download</button>
+                                        <button class="danger" type="button" @onclick="() => DeleteMockup(story.StoryId, mockup.MockupId)">Delete</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <div class="actions">
+                    <button type="button"
+                            @onclick="() => GenerateMockup(story.StoryId)"
+                            disabled="@_generatingStoryIds.Contains(story.StoryId)">
+                        @(_generatingStoryIds.Contains(story.StoryId) ? "Generating..." : "Generate Mockup")
+                    </button>
+                    <button class="secondary" type="button" @onclick="() => GoToEdit(story.StoryId)">Edit</button>
+                    <button class="danger"
+                            type="button"
+                            @onclick="() => DeleteStory(story.StoryId)"
+                            disabled="@_deletingIds.Contains(story.StoryId)">
+                        @(_deletingIds.Contains(story.StoryId) ? "Deleting..." : "Delete")
+                    </button>
+                </div>
+            </article>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int AppId { get; set; }
+
+    private List<StoryResponseDto> _stories = new();
+    private Dictionary<int, List<MockupResponseDto>> _mockupsByStoryId = new();
+    private HashSet<int> _deletingIds = new();
+    private HashSet<int> _generatingStoryIds = new();
+    private bool _loading = true;
+    private string? _error;
+    private string? _appName;
+
+    private void GoHome() => Nav.NavigateTo("/");
+    private void GoToCreate() => Nav.NavigateTo("/stories/new");
+    private void GoToEdit(int storyId) => Nav.NavigateTo($"/stories/{storyId}/update");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            var auth = await Auth.RefreshCurrentUserAsync();
+            if (!auth.Succeeded)
+            {
+                Nav.NavigateTo("/login");
+                return;
+            }
+        }
+
+        try
+        {
+            _loading = true;
+            _error = null;
+            CurrentApp.Set(AppId);
+
+            var app = await Http.GetFromJsonAsync<AppResponseDto>($"api/app/{AppId}");
+            _appName = app?.Name;
+
+            _stories = await Http.GetFromJsonAsync<List<StoryResponseDto>>($"api/app/{AppId}/stories") ?? new();
+            await LoadMockupsForStories();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to load stories: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadMockupsForStories()
+    {
+        _mockupsByStoryId = new Dictionary<int, List<MockupResponseDto>>();
+
+        foreach (var story in _stories)
+        {
+            _mockupsByStoryId[story.StoryId] =
+                await Http.GetFromJsonAsync<List<MockupResponseDto>>($"api/mockup/story/{story.StoryId}") ?? new();
+        }
+    }
+
+    private List<MockupResponseDto> GetMockupsForStory(int storyId)
+    {
+        return _mockupsByStoryId.TryGetValue(storyId, out var mockups)
+            ? mockups
+            : new List<MockupResponseDto>();
+    }
+
+    private static string GetMockupStatusClass(MockupResponseDto mockup)
+    {
+        return mockup.Status.ToString().Equals("Ready", StringComparison.OrdinalIgnoreCase)
+            ? "mockup-status ready"
+            : "mockup-status failed";
+    }
+
+    private string GetMockupDisplayName(MockupResponseDto mockup, List<MockupResponseDto> mockups)
+    {
+        var chronologicalMockups = mockups
+            .OrderBy(m => m.CreatedAtUtc)
+            .ThenBy(m => m.MockupId)
+            .ToList();
+
+        var mockupNumber = chronologicalMockups.FindIndex(m => m.MockupId == mockup.MockupId) + 1;
+        var appName = string.IsNullOrWhiteSpace(_appName)
+            ? "Quill"
+            : _appName.Trim();
+
+        return $"{appName} Mockup {mockupNumber}";
+    }
+
+    private static string BuildSafeFileName(string value)
+    {
+        var fileName = value.Trim().ToLowerInvariant();
+        var builder = new System.Text.StringBuilder(fileName.Length);
+
+        foreach (var character in fileName)
+        {
+            if (char.IsLetterOrDigit(character))
+                builder.Append(character);
+            else if (char.IsWhiteSpace(character) || character is '-' or '_')
+                builder.Append('-');
+        }
+
+        var safeName = builder.ToString().Trim('-');
+        return string.IsNullOrWhiteSpace(safeName)
+            ? "quill-mockup"
+            : safeName;
+    }
+
+    private async Task GenerateMockup(int storyId)
+    {
+        try
+        {
+            _error = null;
+            _generatingStoryIds.Add(storyId);
+
+            var response = await Http.PostAsJsonAsync(
+                $"api/mockup/story/{storyId}/generate",
+                new MockupGenerateDto
+                {
+                    StoryId = storyId,
+                    GenerationPrompt = "Generate a clean, interactive HTML mockup for this feature."
+                });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var msg = await response.Content.ReadAsStringAsync();
+                _error = $"Mockup generation failed: {msg}";
+                return;
+            }
+
+            var created = await response.Content.ReadFromJsonAsync<MockupResponseDto>();
+            if (created is not null)
+            {
+                if (!_mockupsByStoryId.ContainsKey(storyId))
+                    _mockupsByStoryId[storyId] = new List<MockupResponseDto>();
+
+                _mockupsByStoryId[storyId].Insert(0, created);
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Mockup generation error: {ex.Message}";
+        }
+        finally
+        {
+            _generatingStoryIds.Remove(storyId);
+        }
+    }
+
+    private async Task DownloadMockup(MockupResponseDto mockup, List<MockupResponseDto> mockups)
+    {
+        try
+        {
+            _error = null;
+
+            var response = await Http.GetAsync($"api/mockup/{mockup.MockupId}/download");
+            if (!response.IsSuccessStatusCode)
+            {
+                var msg = await response.Content.ReadAsStringAsync();
+                _error = $"Download failed: {msg}";
+                return;
+            }
+
+            var html = await response.Content.ReadAsStringAsync();
+            var fileName = $"{BuildSafeFileName(GetMockupDisplayName(mockup, mockups))}.html";
+            await JS.InvokeVoidAsync(
+                "quillDownloads.downloadText",
+                fileName,
+                html,
+                "text/html;charset=utf-8");
+        }
+        catch (Exception ex)
+        {
+            _error = $"Download error: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteMockup(int storyId, int mockupId)
+    {
+        try
+        {
+            _error = null;
+
+            var res = await Http.DeleteAsync($"api/mockup/{mockupId}");
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _error = $"Delete mockup failed: {msg}";
+                return;
+            }
+
+            if (_mockupsByStoryId.TryGetValue(storyId, out var mockups))
+                mockups.RemoveAll(m => m.MockupId == mockupId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete mockup error: {ex.Message}";
+        }
+    }
+
+    private async Task DeleteStory(int storyId)
+    {
+        if (CurrentUser.UserId is null)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+
+        try
+        {
+            _error = null;
+            _deletingIds.Add(storyId);
+
+            var res = await Http.DeleteAsync($"api/story/{storyId}");
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _error = $"Delete failed: {msg}";
+                return;
+            }
+
+            _stories.RemoveAll(s => s.StoryId == storyId);
+            _mockupsByStoryId.Remove(storyId);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete error: {ex.Message}";
+        }
+        finally
+        {
+            _deletingIds.Remove(storyId);
+        }
+    }
+}

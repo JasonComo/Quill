@@ -1,0 +1,90 @@
+@page "/signup"
+@using System.ComponentModel.DataAnnotations
+@using QuillApp.Blazor.DTOs
+@using QuillApp.Blazor.Services
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+
+<section class="auth-wrap">
+    <div class="panel auth-card">
+        <div class="page-kicker">New workspace</div>
+        <h3>Create your account</h3>
+        <p class="auth-note">Set up a private Quill workspace for product ideas, apps, and story detail.</p>
+
+        <EditForm Model="_model" OnValidSubmit="HandleSignup">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-field">
+                <label>Email</label>
+                <InputText @bind-Value="_model.Email" />
+            </div>
+
+            <div class="form-field">
+                <label>Password</label>
+                <InputText @bind-Value="_model.Password" type="password" />
+            </div>
+
+            <div class="actions">
+                <button type="submit">Create account</button>
+                <button class="secondary" type="button" @onclick="GoToLogin">Back to login</button>
+            </div>
+        </EditForm>
+
+        @if (!string.IsNullOrWhiteSpace(_status))
+        {
+            <p class="status">@_status</p>
+        }
+    </div>
+</section>
+
+@code {
+    private SignupModel _model = new();
+    private string? _status;
+
+    private void GoToLogin() => Nav.NavigateTo("/login");
+
+    private async Task HandleSignup()
+    {
+        _status = null;
+
+        try
+        {
+            var request = new LoginRequestDto
+            {
+                Email = _model.Email,
+                Password = _model.Password
+            };
+
+            var register = await Auth.RegisterAsync(request);
+            if (!register.Succeeded)
+            {
+                _status = $"Signup failed: {register.Error}";
+                return;
+            }
+
+            var login = await Auth.LoginAsync(request);
+            if (!login.Succeeded)
+            {
+                _status = "Account created, but auto-login failed. Please log in.";
+                Nav.NavigateTo("/login");
+                return;
+            }
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _status = $"Signup error: {ex.Message}";
+        }
+    }
+
+    private class SignupModel
+    {
+        [Required]
+        public string Email { get; set; } = string.Empty;
+
+        [Required]
+        public string Password { get; set; } = string.Empty;
+    }
+}

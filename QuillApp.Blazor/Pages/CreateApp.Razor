@@ -1,0 +1,154 @@
+@page "/apps/new"
+@using System.Net.Http.Json
+@using System.ComponentModel.DataAnnotations
+@using QuillApp.Blazor.Services
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">New app</div>
+        <h1>Create App</h1>
+        <p class="page-subtitle">Capture the product shape before you turn it into stories.</p>
+    </div>
+</section>
+
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <p class="status">@_status</p>
+}
+
+@if (CurrentUser.UserId is null)
+{
+    <div class="panel form-panel">
+        <p>You must log in first.</p>
+        <button type="button" @onclick="GoToLogin">Go to Login</button>
+    </div>
+}
+else
+{
+    <EditForm class="panel form-panel" Model="_model" OnValidSubmit="HandleSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-grid">
+            <div class="form-field">
+                <label>Name</label>
+                <InputText @bind-Value="_model.Name" />
+            </div>
+
+            <div class="form-field">
+                <label>Purpose</label>
+                <InputText @bind-Value="_model.Purpose" />
+            </div>
+
+            <div class="form-field">
+                <label>App Type</label>
+                <InputSelect @bind-Value="_model.AppType">
+                    @foreach (var opt in Enum.GetValues<AppTypeDto>())
+                    {
+                        <option value="@opt">@opt</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="form-field">
+                <label>Field</label>
+                <InputSelect @bind-Value="_model.Field">
+                    @foreach (var opt in Enum.GetValues<FieldDto>())
+                    {
+                        <option value="@opt">@opt</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="form-field">
+                <label>Target User</label>
+                <InputSelect @bind-Value="_model.TargetUser">
+                    @foreach (var opt in Enum.GetValues<TargetUserDto>())
+                    {
+                        <option value="@opt">@opt</option>
+                    }
+                </InputSelect>
+            </div>
+
+            <div class="form-field full">
+                <label>Additional Info</label>
+                <InputTextArea @bind-Value="_model.AdditionalInfo" />
+            </div>
+        </div>
+
+        <div class="actions">
+            <button type="submit">Create app</button>
+            <button class="secondary" type="button" @onclick="GoHome">Cancel</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    private CreateAppModel _model = new();
+    private string? _status;
+
+    private void GoToLogin() => Nav.NavigateTo("/login");
+    private void GoHome() => Nav.NavigateTo("/");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+            await Auth.RefreshCurrentUserAsync();
+    }
+
+    private async Task HandleSubmit()
+    {
+        _status = null;
+
+        if (CurrentUser.UserId is null)
+        {
+            _status = "Not logged in.";
+            return;
+        }
+
+        try
+        {
+            var payload = new
+            {
+                name = _model.Name,
+                purpose = _model.Purpose,
+                appType = (int)_model.AppType,
+                field = (int)_model.Field,
+                targetUser = (int)_model.TargetUser,
+                additionalInfo = _model.AdditionalInfo
+            };
+
+            var res = await Http.PostAsJsonAsync("api/app", payload);
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _status = $"Create failed: {msg}";
+                return;
+            }
+
+            Nav.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _status = $"Error: {ex.Message}";
+        }
+    }
+
+    private class CreateAppModel
+    {
+        [Required] public string Name { get; set; } = string.Empty;
+        [Required] public string Purpose { get; set; } = string.Empty;
+        [Required] public AppTypeDto AppType { get; set; } = AppTypeDto.Web;
+        [Required] public FieldDto Field { get; set; } = FieldDto.Technology;
+        [Required] public TargetUserDto TargetUser { get; set; } = TargetUserDto.Everyone;
+        public string? AdditionalInfo { get; set; }
+    }
+
+    private enum AppTypeDto { Web = 1, Mobile = 2, Desktop = 3, Game = 4, Other = 5 }
+    private enum FieldDto { Technology = 1, Business = 2, Education = 3, Entertainment = 4, Other = 5 }
+    private enum TargetUserDto { Professional = 1, Student = 2, Teacher = 3, Everyone = 4, Other = 5 }
+}

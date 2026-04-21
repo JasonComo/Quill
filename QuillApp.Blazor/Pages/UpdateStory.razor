@@ -1,0 +1,155 @@
+@page "/stories/{StoryId:int}/update"
+@using System.Net.Http.Json
+@using QuillApp.Blazor.Services
+@using QuillApp.DTOs
+@inject HttpClient Http
+@inject AuthApiClient Auth
+@inject NavigationManager Nav
+@inject QuillApp.Blazor.State.CurrentUser CurrentUser
+@inject QuillApp.Blazor.State.CurrentApp CurrentApp
+
+<section class="page-header">
+    <div>
+        <div class="page-kicker">Story detail</div>
+        <h1>Edit Story</h1>
+        <p class="page-subtitle">Refine the description and criteria while keeping the story anchored to its app.</p>
+    </div>
+</section>
+
+@if (_loading)
+{
+    <div class="panel form-panel">Loading story...</div>
+}
+else if (!string.IsNullOrWhiteSpace(_status))
+{
+    <p class="status">@_status</p>
+}
+else if (CurrentUser.UserId is null)
+{
+    <div class="panel form-panel">
+        <p>You must log in first.</p>
+        <button type="button" @onclick="GoToLogin">Go to Login</button>
+    </div>
+}
+else
+{
+    <EditForm class="panel form-panel" Model="_model" OnValidSubmit="HandleSubmit">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="form-field">
+            <label>Title</label>
+            <InputText @bind-Value="_model.Title" />
+        </div>
+
+        <div class="form-field">
+            <label>Description</label>
+            <InputTextArea @bind-Value="_model.Description" />
+        </div>
+
+        <div class="form-field">
+            <label>Criteria</label>
+            <InputTextArea @bind-Value="_model.Criteria" />
+        </div>
+
+        <div class="actions">
+            <button type="submit">Save story</button>
+            <button class="secondary" type="button" @onclick="GoBack">Cancel</button>
+        </div>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int StoryId { get; set; }
+
+    private bool _loading = true;
+    private string? _status;
+    private StoryUpdateDto _model = new();
+
+    private void GoToLogin() => Nav.NavigateTo("/login");
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            var auth = await Auth.RefreshCurrentUserAsync();
+            if (!auth.Succeeded)
+            {
+                _loading = false;
+                GoToLogin();
+                return;
+            }
+        }
+
+        if (CurrentApp.AppId is null)
+        {
+            _loading = false;
+            GoBack();
+            return;
+        }
+
+        try
+        {
+            _loading = true;
+            _status = null;
+
+            var story = await Http.GetFromJsonAsync<StoryResponseDto>($"api/story/{StoryId}");
+            if (story is null || story.AppId != CurrentApp.AppId.Value)
+            {
+                _status = "Story was not found for the selected app.";
+                return;
+            }
+
+            _model.StoryId = story.StoryId;
+            _model.Title = story.Title;
+            _model.Description = story.Description;
+            _model.Criteria = story.Criteria;
+            _model.AppId = story.AppId;
+        }
+        catch (Exception ex)
+        {
+            _status = $"Failed to load story: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (CurrentUser.UserId is null)
+        {
+            _status = "Not logged in.";
+            return;
+        }
+
+        try
+        {
+            var res = await Http.PutAsJsonAsync($"api/story/{StoryId}", _model);
+            if (!res.IsSuccessStatusCode)
+            {
+                var msg = await res.Content.ReadAsStringAsync();
+                _status = $"Update failed: {msg}";
+                return;
+            }
+
+            Nav.NavigateTo($"/apps/{CurrentApp.AppId}/stories");
+        }
+        catch (Exception ex)
+        {
+            _status = $"Update error: {ex.Message}";
+        }
+    }
+
+    private void GoBack()
+    {
+        if (CurrentApp.AppId is null)
+        {
+            Nav.NavigateTo("/");
+            return;
+        }
+
+        Nav.NavigateTo($"/apps/{CurrentApp.AppId.Value}/stories");
+    }
+}

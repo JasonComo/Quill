@@ -1,0 +1,16 @@
+# Build output
+bin/
+obj/
+
+# Rider / IDE
+.idea/
+.vs/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Local settings
+appsettings.Development.json
+compose.yaml
