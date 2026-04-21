@@ -16,7 +16,7 @@ The app includes an ASP.NET Core backend, a Blazor frontend, cookie-based authen
 - SQLite
 - ASP.NET Core Identity
 - OpenAI Responses API
-- Repository and service layers
+- Repository pattern
 - DTOs and mapper classes
 ### Frontend
 - Blazor Server
